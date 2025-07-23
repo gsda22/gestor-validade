@@ -128,7 +128,7 @@ with abas[0]:
     with st.form("formulario_registro"):
         codigo_input = st.text_input("Código do Produto")
         descricao = mapa_desc.get(codigo_input.strip(), "")
-        st.text_input("Descrição", value=descricao, disabled=True)
+        st.text_input("Descrição", value=descricao,)
 
         validade = st.date_input("Data de Validade", min_value=date.today())
         preco_atual = st.number_input("Preço Atual", min_value=0.0, step=0.01)
@@ -146,7 +146,7 @@ with abas[0]:
         else:
             novo = {
                 "Código": codigo_input.strip(),
-                "Descrição": descricao,
+                "Descrição": descricao_input,
                 "Validade": validade,
                 "Preço Atual": preco_atual,
                 "Preço Queima": preco_queima,
