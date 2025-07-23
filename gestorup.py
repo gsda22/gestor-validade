@@ -36,14 +36,13 @@ CREATE TABLE IF NOT EXISTS validade (
 conn_validade.commit()
 
 # ========== VARIÁVEIS DE SESSÃO ==========
+
 if "logado" not in st.session_state:
     st.session_state.logado = False
 if "usuario" not in st.session_state:
     st.session_state.usuario = ""
-if "descricao_banco" not in st.session_state:
-    st.session_state.descricao_banco = ""
-if "info_banco" not in st.session_state:
-    st.session_state.info_banco = {}
+if "descricao_produto_base" not in st.session_state:
+    st.session_state.descricao_produto_base = ""
 
 # ========== FUNÇÕES AUXILIARES ==========
 
@@ -84,26 +83,6 @@ def carregar_registros():
     else:
         return pd.DataFrame(columns=["Código", "Descrição", "Validade", "Preço Atual", "Preço Queima", "Custo Atual", "Custo Anterior", "Quantidade", "Unidade", "Dias p/ Vencer"])
 
-def buscar_info_banco(codigo):
-    cursor_validade.execute("""
-        SELECT descricao, preco_atual, preco_queima, custo_atual, custo_anterior, quantidade, unidade
-        FROM validade
-        WHERE codigo = ?
-        ORDER BY id DESC LIMIT 1
-    """, (codigo,))
-    resultado = cursor_validade.fetchone()
-    if resultado:
-        return {
-            "descricao": resultado[0],
-            "preco_atual": resultado[1],
-            "preco_queima": resultado[2],
-            "custo_atual": resultado[3],
-            "custo_anterior": resultado[4],
-            "quantidade": resultado[5],
-            "unidade": resultado[6]
-        }
-    return {}
-
 # ========== CONFIGURAÇÕES INICIAIS ==========
 
 st.set_page_config("Gestão de Validade", layout="wide")
@@ -127,8 +106,7 @@ else:
     if st.button("🔓 Sair"):
         st.session_state.logado = False
         st.session_state.usuario = ""
-        st.session_state.descricao_banco = ""
-        st.session_state.info_banco = {}
+        st.session_state.descricao_produto_base = ""
         st.experimental_rerun()
 
 # ========== ABAS ==========
@@ -151,27 +129,30 @@ with abas[0]:
     with st.form("formulario_registro"):
         codigo_input = st.text_input("Código do Produto", key="codigo_input")
 
-        if st.form_submit_button("🔍 Buscar descrição no banco"):
-            info = buscar_info_banco(codigo_input.strip())
-            if info:
-                st.session_state.info_banco = info
-                st.success("Informações carregadas do banco.")
+        if st.form_submit_button("🔍 Buscar na base de produtos"):
+            if uploaded_file:
+                base = pd.read_excel(uploaded_file)
+                base["codigo"] = base["codigo"].astype(str)
+                mapa_desc = dict(zip(base["codigo"], base["descricao"]))
+                descricao = mapa_desc.get(codigo_input.strip(), "")
+                if descricao:
+                    st.session_state.descricao_produto_base = descricao
+                    st.success("Descrição encontrada na base.")
+                else:
+                    st.session_state.descricao_produto_base = ""
+                    st.warning("Código não encontrado na base.")
             else:
-                st.session_state.info_banco = {}
-                st.warning("Produto não encontrado. Preencha manualmente.")
+                st.warning("Você precisa carregar uma base primeiro.")
 
-        # Preferência: base > banco > vazio
-        descricao_base = mapa_desc.get(codigo_input.strip(), "")
-        descricao_final = descricao_base or st.session_state.info_banco.get("descricao", "")
-        descricao_input = st.text_input("Descrição", value=descricao_final)
+        descricao_input = st.text_input("Descrição", value=st.session_state.descricao_produto_base)
 
         validade = st.date_input("Data de Validade", min_value=date.today())
-        preco_atual = st.number_input("Preço Atual", min_value=0.0, step=0.01, value=st.session_state.info_banco.get("preco_atual", 0.0))
-        preco_queima = st.number_input("Preço de Queima de Estoque", min_value=0.0, step=0.01, value=st.session_state.info_banco.get("preco_queima", 0.0))
-        custo_atual = st.number_input("Custo Atual", min_value=0.0, step=0.01, value=st.session_state.info_banco.get("custo_atual", 0.0))
-        custo_anterior = st.number_input("Custo Anterior", min_value=0.0, step=0.01, value=st.session_state.info_banco.get("custo_anterior", 0.0))
-        quantidade = st.number_input("Quantidade", min_value=0.0, step=1.0, value=st.session_state.info_banco.get("quantidade", 0.0))
-        unidade = st.selectbox("Unidade", ["Unidade", "Kg", "Litro", "Pacote", "Caixa"], index=["Unidade", "Kg", "Litro", "Pacote", "Caixa"].index(st.session_state.info_banco.get("unidade", "Unidade")))
+        preco_atual = st.number_input("Preço Atual", min_value=0.0, step=0.01)
+        preco_queima = st.number_input("Preço de Queima de Estoque", min_value=0.0, step=0.01)
+        custo_atual = st.number_input("Custo Atual", min_value=0.0, step=0.01)
+        custo_anterior = st.number_input("Custo Anterior", min_value=0.0, step=0.01)
+        quantidade = st.number_input("Quantidade", min_value=0.0, step=1.0)
+        unidade = st.selectbox("Unidade", ["Unidade", "Kg", "Litro", "Pacote", "Caixa"])
 
         enviado = st.form_submit_button("Salvar Registro")
 
@@ -192,6 +173,7 @@ with abas[0]:
             }
             salvar_registro(novo)
             st.success("Produto registrado com sucesso.")
+            st.session_state.descricao_produto_base = ""
 
 # ========== ABA: Relação de Produtos ==========
 
