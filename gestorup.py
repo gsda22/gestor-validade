@@ -17,6 +17,29 @@ CREATE TABLE IF NOT EXISTS usuarios (
 """)
 conn_usuarios.commit()
 
+# INSERIR USUÁRIO ADMIN PADRÃO SE NÃO EXISTIR
+cursor_usuarios.execute("SELECT * FROM usuarios WHERE usuario='admin'")
+if cursor_usuarios.fetchone() is None:
+    cursor_usuarios.execute("INSERT INTO usuarios (usuario, senha) VALUES (?, ?)", ("admin", "79318520"))
+    conn_usuarios.commit()
+
+# Tabela para registros de validade
+cursor_produtos.execute("""
+CREATE TABLE IF NOT EXISTS registros_validade (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo TEXT,
+    descricao TEXT,
+    validade TEXT,
+    preco_atual TEXT,
+    preco_queima TEXT,
+    custo_atual TEXT,
+    custo_anterior TEXT,
+    quantidade TEXT,
+    data_registro TEXT
+)
+""")
+conn_produtos.commit()
+
 # ========== VARIÁVEIS DE SESSÃO ==========
 if "logado" not in st.session_state:
     st.session_state.logado = False
@@ -40,26 +63,32 @@ def login():
 # ========== CADASTRO DE USUÁRIO (apenas admin) ==========
 def cadastrar_usuario():
     st.subheader("Cadastro de Novo Usuário (Admin apenas)")
-    nova_senha_admin = st.text_input("Senha do Administrador", type="password")
+    nova_senha_admin = st.text_input("Senha do Administrador", type="password", key="senha_admin")
     if nova_senha_admin == "79318520":
-        novo_usuario = st.text_input("Novo Usuário")
-        nova_senha = st.text_input("Nova Senha", type="password")
-        if st.button("Cadastrar"):
-            cursor_usuarios.execute("INSERT OR IGNORE INTO usuarios (usuario, senha) VALUES (?, ?)", (novo_usuario, nova_senha))
-            conn_usuarios.commit()
-            st.success("Usuário cadastrado com sucesso!")
-    else:
+        novo_usuario = st.text_input("Novo Usuário", key="novo_usuario")
+        nova_senha = st.text_input("Nova Senha", type="password", key="nova_senha")
+        if st.button("Cadastrar", key="btn_cadastrar"):
+            if novo_usuario.strip() == "" or nova_senha.strip() == "":
+                st.warning("Preencha todos os campos para cadastrar.")
+            else:
+                try:
+                    cursor_usuarios.execute("INSERT INTO usuarios (usuario, senha) VALUES (?, ?)", (novo_usuario, nova_senha))
+                    conn_usuarios.commit()
+                    st.success(f"Usuário '{novo_usuario}' cadastrado com sucesso!")
+                except sqlite3.IntegrityError:
+                    st.error("Usuário já existe.")
+    elif nova_senha_admin != "":
         st.warning("Senha de administrador incorreta.")
 
 # ========== PÁGINA PRINCIPAL ==========
 def app():
     st.title("📦 Registro de Validade")
 
-    # Upload opcional (caso deseje trocar a base manualmente futuramente)
+    # Upload opcional (para trocar a base de produtos)
     st.caption("Selecione a base de produtos (.xlsx)")
-    arquivo = st.file_uploader("Drag and drop file here", type=["xlsx"])
+    arquivo = st.file_uploader("Drag and drop file here", type=["xlsx"], key="upload_base")
 
-    # Conexão com banco de produtos
+    # Criar tabela produtos caso não exista
     cursor_produtos.execute("CREATE TABLE IF NOT EXISTS produtos (codigo TEXT PRIMARY KEY, descricao TEXT)")
     conn_produtos.commit()
 
@@ -73,12 +102,12 @@ def app():
             st.success("Base carregada com sucesso.")
 
     with st.form("form_validade"):
-        codigo = st.text_input("Código do Produto")
+        codigo = st.text_input("Código do Produto", key="codigo_produto")
         buscar = st.form_submit_button("🔍 Buscar na base de produtos")
 
         descricao = ""
-        if buscar:
-            cursor_produtos.execute("SELECT descricao FROM produtos WHERE codigo=?", (codigo,))
+        if buscar and codigo.strip() != "":
+            cursor_produtos.execute("SELECT descricao FROM produtos WHERE codigo=?", (codigo.strip(),))
             resultado = cursor_produtos.fetchone()
             if resultado:
                 descricao = resultado[0]
@@ -86,22 +115,43 @@ def app():
             else:
                 st.warning("Produto não encontrado. Preencha a descrição manualmente.")
 
-        descricao = st.text_input("Descrição", value=descricao)
-        validade = st.date_input("Data de Validade", value=date.today())
-        preco_atual = st.text_input("Preço Atual")
-        preco_queima = st.text_input("Preço Queima de Estoque")
-        custo_atual = st.text_input("Custo Atual")
-        custo_anterior = st.text_input("Custo Anterior")
-        quantidade = st.text_input("Quantidade (UN ou KG)")
+        descricao = st.text_input("Descrição", value=descricao, key="descricao_produto")
+        validade = st.date_input("Data de Validade", value=date.today(), key="validade")
+        preco_atual = st.text_input("Preço Atual", key="preco_atual")
+        preco_queima = st.text_input("Preço Queima de Estoque", key="preco_queima")
+        custo_atual = st.text_input("Custo Atual", key="custo_atual")
+        custo_anterior = st.text_input("Custo Anterior", key="custo_anterior")
+        quantidade = st.text_input("Quantidade (UN ou KG)", key="quantidade")
 
         salvar = st.form_submit_button("Salvar Registro")
         if salvar:
-            st.success("Produto registrado com sucesso!")
+            if codigo.strip() == "":
+                st.error("O código do produto é obrigatório.")
+            else:
+                cursor_produtos.execute("""
+                    INSERT INTO registros_validade
+                    (codigo, descricao, validade, preco_atual, preco_queima, custo_atual, custo_anterior, quantidade, data_registro)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    codigo.strip(),
+                    descricao.strip(),
+                    validade.strftime("%Y-%m-%d"),
+                    preco_atual.strip(),
+                    preco_queima.strip(),
+                    custo_atual.strip(),
+                    custo_anterior.strip(),
+                    quantidade.strip(),
+                    date.today().strftime("%Y-%m-%d")
+                ))
+                conn_produtos.commit()
+                st.success("Produto registrado com sucesso!")
 
+    # Gerenciar usuários (apenas para admin)
     if st.session_state.usuario == "admin":
         with st.expander("👤 Gerenciar Usuários"):
             cadastrar_usuario()
 
+    # Botão sair
     if st.button("Sair"):
         st.session_state.logado = False
         st.session_state.usuario = ""
