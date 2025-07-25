@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS registros_validade (
     custo_atual TEXT,
     custo_anterior TEXT,
     quantidade TEXT,
-    data_registro TEXT
+    data_registro TEXT,
+    lote TEXT
 )
 """)
 conn_produtos.commit()
@@ -45,6 +46,16 @@ if "logado" not in st.session_state:
     st.session_state.logado = False
 if "usuario" not in st.session_state:
     st.session_state.usuario = ""
+if "lote_atual" not in st.session_state:
+    # Gera nome automático do próximo lote
+    cursor_produtos.execute("SELECT DISTINCT lote FROM registros_validade WHERE lote LIKE 'TPC_%'")
+    lotes_existentes = cursor_produtos.fetchall()
+    numeros = [int(l[0].split('_')[1]) for l in lotes_existentes if l[0].split('_')[1].isdigit()]
+    proximo_numero = max(numeros, default=0) + 1
+    st.session_state.lote_atual = f"TPC_{proximo_numero:02d}"
+    st.session_state.lote_fechado = False
+if "lote_fechado" not in st.session_state:
+    st.session_state.lote_fechado = False
 
 # ========== LOGIN ==========
 def login():
@@ -84,11 +95,24 @@ def cadastrar_usuario():
 def app():
     st.title("📦 Registro de Validade")
 
+    st.info(f"🔖 Lote atual: **{st.session_state.lote_atual}**")
+
+    if not st.session_state.lote_fechado:
+        if st.button("📦 Fechar lote atual"):
+            # Fecha o lote atual e cria um novo automaticamente
+            cursor_produtos.execute("SELECT DISTINCT lote FROM registros_validade WHERE lote LIKE 'TPC_%'")
+            lotes_existentes = cursor_produtos.fetchall()
+            numeros = [int(l[0].split('_')[1]) for l in lotes_existentes if l[0].split('_')[1].isdigit()]
+            proximo_numero = max(numeros, default=0) + 1
+            st.session_state.lote_atual = f"TPC_{proximo_numero:02d}"
+            st.success("Novo lote iniciado.")
+    else:
+        st.warning("Este lote está fechado. Inicie um novo lote para registrar.")
+
     # Upload opcional (para trocar a base de produtos)
     st.caption("Selecione a base de produtos (.xlsx)")
     arquivo = st.file_uploader("Drag and drop file here", type=["xlsx"], key="upload_base")
 
-    # Criar tabela produtos caso não exista
     cursor_produtos.execute("CREATE TABLE IF NOT EXISTS produtos (codigo TEXT PRIMARY KEY, descricao TEXT)")
     conn_produtos.commit()
 
@@ -127,11 +151,13 @@ def app():
         if salvar:
             if codigo.strip() == "":
                 st.error("O código do produto é obrigatório.")
+            elif st.session_state.lote_fechado:
+                st.warning("Este lote já foi fechado. Inicie um novo lote.")
             else:
                 cursor_produtos.execute("""
                     INSERT INTO registros_validade
-                    (codigo, descricao, validade, preco_atual, preco_queima, custo_atual, custo_anterior, quantidade, data_registro)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (codigo, descricao, validade, preco_atual, preco_queima, custo_atual, custo_anterior, quantidade, data_registro, lote)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     codigo.strip(),
                     descricao.strip(),
@@ -141,10 +167,22 @@ def app():
                     custo_atual.strip(),
                     custo_anterior.strip(),
                     quantidade.strip(),
-                    date.today().strftime("%Y-%m-%d")
+                    date.today().strftime("%Y-%m-%d"),
+                    st.session_state.lote_atual
                 ))
                 conn_produtos.commit()
                 st.success("Produto registrado com sucesso!")
+
+    # Exportar por lote
+    st.subheader("📤 Exportar registros por lote")
+    cursor_produtos.execute("SELECT DISTINCT lote FROM registros_validade ORDER BY id DESC")
+    lotes = [l[0] for l in cursor_produtos.fetchall()]
+    if lotes:
+        lote_selecionado = st.selectbox("Selecione o lote", lotes)
+        if st.button("Exportar Excel"):
+            df_export = pd.read_sql_query("SELECT * FROM registros_validade WHERE lote = ?", conn_produtos, params=(lote_selecionado,))
+            df_export.to_excel(f"registros_{lote_selecionado}.xlsx", index=False)
+            st.success(f"Arquivo 'registros_{lote_selecionado}.xlsx' exportado com sucesso!")
 
     # Gerenciar usuários (apenas para admin)
     if st.session_state.usuario == "admin":
